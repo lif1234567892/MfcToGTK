@@ -1,4 +1,4 @@
-//
+﻿//
 #define IDD_MFC_TEST_DIALOG      102
 #define IDR_MAINFRAME                   128
 #define IDC_EDIT1                       1000
