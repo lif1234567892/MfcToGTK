@@ -61,8 +61,8 @@ void CDialog::DDX_Text(CDataExchange *pDX, int ctrlID, CStringW &strVar)
 		}
 		else if (wt == WIDGET_T_Text)
 		{
-			const char *text = gtk_entry_get_text(GTK_ENTRY(widget));
-			strVar = (const wchar_t*) CA2W(text, CP_UTF8);
+			string text=GetEditText(ctrlID);
+			strVar = (const wchar_t*) CA2W(text.c_str(), CP_UTF8);
 		}
 		else if (wt == WIDGET_T_PushBtn)
 		{
@@ -83,7 +83,7 @@ void CDialog::DDX_Text(CDataExchange *pDX, int ctrlID, CStringW &strVar)
 		}
 		else if (wt == WIDGET_T_Text)
 		{
-			gtk_entry_set_text(GTK_ENTRY(widget), (const char*) CW2A(strVar, CP_UTF8));
+			SetEditText(ctrlID, (const char*) CW2A(strVar, CP_UTF8));
 		}
 		else if (wt == WIDGET_T_PushBtn)
 		{

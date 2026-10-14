@@ -14,12 +14,25 @@ using namespace std;
 #define IDYES               6
 #define IDNO                7
 
+// ========== 新增：编辑框风格标志位，对应MFC RC属性 ==========
+enum EditStyleFlags {
+    EDIT_STYLE_NONE         = 0,
+    EDIT_STYLE_MULTILINE    = 1 << 0,  // ES_MULTILINE 多行
+    EDIT_STYLE_VSCROLL      = 1 << 1,  // WS_VSCROLL 垂直滚动条
+    EDIT_STYLE_HSCROLL      = 1 << 2,  // WS_HSCROLL 水平滚动条
+    EDIT_STYLE_PASSWORD     = 1 << 3,  // ES_PASSWORD 密码输入
+    EDIT_STYLE_READONLY     = 1 << 4,  // ES_READONLY 只读
+    EDIT_STYLE_AUTOHSCROLL  = 1 << 5,  // ES_AUTOHSCROLL 水平自动滚动
+    EDIT_STYLE_AUTOVSCROLL  = 1 << 6,  // ES_AUTOVSCROLL 垂直自动滚动
+};
+
 // 控件定义结构
 struct ControlDef {
     int id;
     std::string type;
     std::string text;
     int x, y, width, height;
+    int style = EDIT_STYLE_NONE; // 新增：存储控件风格标志位
 };
 
 enum WidgetType
@@ -33,7 +46,8 @@ enum WidgetType
 struct WidgetAndType
 {
 	WidgetType _ty=WIDGET_T_None;
-	GtkWidget * pWidget=0;
+	GtkWidget * pWidget=0;         // 外层控件（多行编辑时是滚动容器）
+	GtkWidget * pInnerWidget=0;    // 新增：实际输入控件（单行Entry/多行TextView，其他控件和pWidget一致）
 };
 
 // 资源解析器类
@@ -97,9 +111,18 @@ public:
 	GtkWidget *  GetWidgetByID(int id);
 	WidgetType   GetWidgetType(const string& strT);
   	WidgetType   GetWidgetTypeByID(int id);
-    int m_modalRet = 0; // 存储模态返回值：IDOK/IDCANCEL
-    GMainLoop* m_modalLoop = nullptr; // 模态嵌套事件循环
-    float m_Scale=1.5f;
+    int          m_modalRet = 0;// 存储模态返回值：IDOK/IDCANCEL
+    GMainLoop*   m_modalLoop = nullptr;// 模态嵌套事件循环
+
+    // ========== 统一的输入框内容操作接口，自动适配单行/多行 ==========
+    std::string  GetEditText(int ctrlId);
+    void         SetEditText(int ctrlId, const std::string& text);
+    // ========== 复选框状态操作接口 ==========
+    bool         GetCheckBoxChecked(int ctrlId);
+    void         SetCheckBoxChecked(int ctrlId, bool checked);
+
+
+    float m_Scale=1.75f;
 
 protected:
 	std::vector<ControlDef> m_controls;
@@ -109,6 +132,10 @@ protected:
 	map<int, WidgetAndType> m_controlMap;
 	GtkWidget *             m_hWnd_Widget=0;
 	GtkWindow*              m_hWnd=0;
+
+private:
+    //解析MFC RC风格字符串
+    int                     ParseEditStyle(const std::string& styleStr);
 };
 
 // 全局函数声明

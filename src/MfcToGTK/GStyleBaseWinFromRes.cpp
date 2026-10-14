@@ -1,7 +1,9 @@
 ﻿#include "GStyleBaseWinFromRes.h"
 #include <string>
 #include <vector>
+#include <algorithm>
 #include "MFCGTKUtils.h"
+
 using namespace std;
 
 extern int ConvertControlID(const char *pIDSTR);
@@ -21,6 +23,33 @@ static void StringReplace(std::string &str, const std::string &old_str, const st
 		str.replace(pos, old_str.length(), new_str);
 		pos += new_str.length();
 	}
+}
+
+// ========== 解析MFC编辑框风格字符串 ==========
+int GStyleBaseWinFromRes::ParseEditStyle(const std::string &styleStr)
+{
+	int style = EDIT_STYLE_NONE;
+	std::string cleanStr = styleStr;
+	// 去掉所有空格、引号、换行
+	cleanStr.erase(remove_if(cleanStr.begin(), cleanStr.end(), ::isspace), cleanStr.end());
+	StringReplace(cleanStr, "\"", "");
+	// 按|拆分所有风格标志
+	vector<string> flags;
+	MFCUtils::StringSpiltEx(cleanStr, flags, "|", false, true);
+	for (const auto &flag : flags)
+	{
+		if (flag == "ES_MULTILINE")
+			style |= EDIT_STYLE_MULTILINE;
+		else if (flag == "WS_VSCROLL" || flag == "ES_AUTOVSCROLL")
+			style |= EDIT_STYLE_VSCROLL | EDIT_STYLE_AUTOVSCROLL;
+		else if (flag == "WS_HSCROLL" || flag == "ES_AUTOHSCROLL")
+			style |= EDIT_STYLE_HSCROLL | EDIT_STYLE_AUTOHSCROLL;
+		else if (flag == "ES_PASSWORD")
+			style |= EDIT_STYLE_PASSWORD;
+		else if (flag == "ES_READONLY")
+			style |= EDIT_STYLE_READONLY;
+	}
+	return style;
 }
 
 GStyleBaseWinFromRes::GStyleBaseWinFromRes()
@@ -50,6 +79,7 @@ bool GStyleBaseWinFromRes::ParseResourceString(const std::string &strResDesc)
 		int ctrl_left = 0, ctrl_top = 0;
 		int ctrl_width = 0, ctrl_height = 0;
 		string strCtrlText;
+		int ctrlStyle = EDIT_STYLE_NONE;
 
 		if (0 == strType.compare("DIALOG")) //DIALOG w,h
 		{
@@ -72,6 +102,9 @@ bool GStyleBaseWinFromRes::ParseResourceString(const std::string &strResDesc)
 				ctrl_top = m_Scale * atoi(atrs[2].c_str());
 				ctrl_width = m_Scale * atoi(atrs[3].c_str());
 				ctrl_height = m_Scale * atoi(atrs[4].c_str());
+				// 有第6个参数则解析风格
+				if (atrs.size() >= 6)
+					ctrlStyle = ParseEditStyle(atrs[5]);
 			}
 		}
 		else if (0 == strType.compare("LTEXT")) //text,id, l,t,w,h
@@ -124,11 +157,64 @@ bool GStyleBaseWinFromRes::ParseResourceString(const std::string &strResDesc)
 			control.width = ctrl_width;
 			control.height = ctrl_height;
 			control.text = strCtrlText;
+			control.style = ctrlStyle; // 存储解析后的风格
 			m_controls.push_back(control);
 		}
 	}
 
 	return true;
+}
+
+std::string GStyleBaseWinFromRes::GetEditText(int ctrlId)
+{
+	auto it = m_controlMap.find(ctrlId);
+	if (it == m_controlMap.end() || it->second._ty != WIDGET_T_Text || !it->second.pInnerWidget)
+		return "";
+	// 单行输入框
+	if (GTK_IS_ENTRY(it->second.pInnerWidget))
+		return gtk_entry_get_text(GTK_ENTRY(it->second.pInnerWidget));
+	// 多行输入框
+	else if (GTK_IS_TEXT_VIEW(it->second.pInnerWidget))
+	{
+		GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(it->second.pInnerWidget));
+		GtkTextIter start, end;
+		gtk_text_buffer_get_bounds(buffer, &start, &end);
+		return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+	}
+	return "";
+}
+
+// ========== 新增：统一设置输入框内容 ==========
+void GStyleBaseWinFromRes::SetEditText(int ctrlId, const std::string &text)
+{
+	auto it = m_controlMap.find(ctrlId);
+	if (it == m_controlMap.end() || it->second._ty != WIDGET_T_Text || !it->second.pInnerWidget)
+		return;
+	if (GTK_IS_ENTRY(it->second.pInnerWidget))
+		gtk_entry_set_text(GTK_ENTRY(it->second.pInnerWidget), text.c_str());
+	else if (GTK_IS_TEXT_VIEW(it->second.pInnerWidget))
+	{
+		GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(it->second.pInnerWidget));
+		gtk_text_buffer_set_text(buffer, text.c_str(), -1);
+	}
+}
+
+// ========== 获取复选框状态 ==========
+bool GStyleBaseWinFromRes::GetCheckBoxChecked(int ctrlId)
+{
+	auto it = m_controlMap.find(ctrlId);
+	if (it == m_controlMap.end() || it->second._ty != WIDGET_T_CheckBox || !it->second.pInnerWidget)
+		return false;
+	return gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(it->second.pInnerWidget));
+}
+
+// ========== 设置复选框状态 ==========
+void GStyleBaseWinFromRes::SetCheckBoxChecked(int ctrlId, bool checked)
+{
+	auto it = m_controlMap.find(ctrlId);
+	if (it == m_controlMap.end() || it->second._ty != WIDGET_T_CheckBox || !it->second.pInnerWidget)
+		return;
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(it->second.pInnerWidget), checked);
 }
 
 void GStyleBaseWinFromRes::OnControlClick(GtkWidget *widget)
@@ -139,14 +225,15 @@ void GStyleBaseWinFromRes::OnControlClick(GtkWidget *widget)
 	switch (ctrlId)
 	{
 	case 1: // 对应你定义的控件ID
-		g_print("选择文件按钮被点击\n");
+		//g_print("选择文件按钮被点击\n");
 		break;
 	case 2:
-		g_print("选择目录按钮被点击\n");
+		//g_print("选择目录按钮被点击\n");
 		break;
 		// 其他控件事件处理
 	default:
-		g_print("控件ID:%d 触发事件\n", ctrlId);
+		//g_print("控件ID:%d 触发事件\n", ctrlId);
+		break;
 	}
 }
 
@@ -282,6 +369,17 @@ void GStyleBaseWinFromRes::CreateGTKInterface()
 			WidgetAndType wtt;
 			wtt.pWidget = pWid;
 			wtt._ty = GetWidgetType(control.type);
+			// 给InnerWidget赋值
+			if (wtt._ty == WIDGET_T_Text)
+			{
+				// 多行输入框Inner是TextView，存在g_object_data里
+				GtkWidget *pInner = (GtkWidget*) g_object_get_data(G_OBJECT(pWid), "inner_text_widget");
+				wtt.pInnerWidget = pInner ? pInner : pWid;
+			}
+			else
+			{
+				wtt.pInnerWidget = pWid;
+			}
 			m_controlMap[control.id] = wtt;
 
 			// 可选：绑定控件事件，比如按钮点击事件
@@ -296,14 +394,17 @@ void GStyleBaseWinFromRes::CreateGTKInterface()
 		}
 	}
 	// 5. CSS清除默认内边距，这一步是实现12x12的关键
-	const char *css = "button, entry, checkbutton, radiobutton, combobox, label, scale {padding: 0px;  margin: 0px;  border-width: 1px;  min-height: 0px;  min-width: 0px;} \n"
-			"checkbutton check, radiobutton radio {  padding: 0px;  margin: 0px;  min-height: 0px;  min-width: 0px;}\n"
-			"combobox box {  padding: 0px;  margin: 0px;} ";
+	const char *css = "button, entry, checkbutton, radiobutton, combobox, label, scale { padding: 0px; margin: 0px; border-width: 1px; min-height: 0px; min-width: 0px; } \n"
+			"checkbutton check, radiobutton radio {  padding: 0px; margin: 0px; min-height: 0px; min-width: 0px; } \n"
+			"scrolledwindow { border-width: 1px; padding:0; margin:0; min-height:0px; } \n"
+			"textview { padding: 2px; margin:0; min-height:0px; } \n"
+			"combobox box { padding: 0px; margin: 0px; }";
 
 	GtkCssProvider *provider = gtk_css_provider_new();
 	gtk_css_provider_load_from_data(provider, css, -1, NULL);
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(provider),
 	GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+	g_object_unref(provider); // 新增：释放CSS provider避免内存泄漏
 }
 
 // 获取控件列表
@@ -336,10 +437,41 @@ GtkWidget* CreateControlFromDefinition(const ControlDef &control)
 
 GtkWidget* CreateEditBox(const ControlDef &control)
 {
-	GtkWidget *entry = gtk_entry_new();
-	gtk_widget_set_size_request(entry, control.width, control.height);
-	// 添加到容器中
-	return entry;
+	// 单行编辑框
+	if (!(control.style & EDIT_STYLE_MULTILINE))
+	{
+		GtkWidget *entry = gtk_entry_new();
+		gtk_widget_set_size_request(entry, control.width, control.height);
+		// 密码模式
+		if (control.style & EDIT_STYLE_PASSWORD)
+			gtk_entry_set_visibility(GTK_ENTRY(entry), FALSE);
+		// 只读
+		if (control.style & EDIT_STYLE_READONLY)
+			gtk_editable_set_editable(GTK_EDITABLE(entry), FALSE);
+		return entry;
+	}
+	// 多行编辑框：滚动容器套TextView
+	else
+	{
+		GtkWidget *scrolled = gtk_scrolled_window_new(NULL, NULL);
+		gtk_widget_set_size_request(scrolled, control.width, control.height);
+		// 滚动条策略对齐MFC行为
+		GtkPolicyType vPolicy = (control.style & EDIT_STYLE_VSCROLL) ? GTK_POLICY_AUTOMATIC : GTK_POLICY_NEVER;
+		GtkPolicyType hPolicy = (control.style & EDIT_STYLE_HSCROLL) ? GTK_POLICY_AUTOMATIC : GTK_POLICY_NEVER;
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), hPolicy, vPolicy);
+		// 创建TextView
+		GtkWidget *textView = gtk_text_view_new();
+		gtk_container_add(GTK_CONTAINER(scrolled), textView);
+		// 自动换行：没有水平滚动条时自动换行
+		if (!(control.style & EDIT_STYLE_HSCROLL))
+			gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textView), GTK_WRAP_WORD_CHAR);
+		// 只读
+		if (control.style & EDIT_STYLE_READONLY)
+			gtk_text_view_set_editable(GTK_TEXT_VIEW(textView), FALSE);
+		// 把实际TextView存在滚动容器的data里，后面取内容用
+		g_object_set_data(G_OBJECT(scrolled), "inner_text_widget", textView);
+		return scrolled;
+	}
 }
 
 GtkWidget* CreateButton(const ControlDef &control)
